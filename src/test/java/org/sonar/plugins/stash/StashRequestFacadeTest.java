@@ -1,5 +1,19 @@
 package org.sonar.plugins.stash;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.mockito.Matchers.anyLong;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.ArrayList;
+
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -15,6 +29,13 @@ import static org.junit.Assert.*;
 import static org.mockito.Matchers.anyLong;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.*;
+import org.sonar.plugins.stash.issue.MarkdownPrinter;
+import org.sonar.plugins.stash.issue.SonarQubeIssue;
+import org.sonar.plugins.stash.issue.SonarQubeIssuesReport;
+import org.sonar.plugins.stash.issue.StashCommentReport;
+import org.sonar.plugins.stash.issue.StashDiffReport;
+import org.sonar.plugins.stash.issue.StashPullRequest;
+import org.sonar.plugins.stash.issue.StashUser;
 
 public class StashRequestFacadeTest {
 
@@ -48,7 +69,7 @@ public class StashRequestFacadeTest {
   private static final String STASH_REPOSITORY = "Repository";
   private static final String STASH_PULLREQUEST_ID = "1";
   private static final String STASH_DIFF_TYPE = "StashDiffType";
-
+  private static final String STASH_USER = "SonarQube";
   private static final String SONARQUBE_URL = "http://sonar/url";
 
   private static final String FILE_PATH_1 = "path/to/file1";
@@ -58,6 +79,8 @@ public class StashRequestFacadeTest {
   public void setUp() {
     config = mock(StashPluginConfiguration.class);
     myFacade = new StashRequestFacade(config);
+  
+    stashClient = mock(StashClient.class);
   }
 
   private void initConfigForPostCommentLineOnPullRequest() throws Exception {
@@ -260,5 +283,53 @@ public class StashRequestFacadeTest {
     } catch (StashClientException e) {
       assertFalse("Unexpected Exception: postCommentLineOnPullRequest does not raised any StashClientException", true);
     }
+  }
+
+  @Test
+  public void testApprovePullRequest() throws Exception {
+    myFacade.approvePullRequest(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, "sonarqube", stashClient);
+    verify(stashClient, times(1)).approvePullRequest(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID);
+  }
+    
+  @Test
+  public void addResetPullRequestApproval() throws Exception {
+    myFacade.resetPullRequestApproval(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, "sonarqube", stashClient);
+    verify(stashClient, times(1)).resetPullRequestApproval(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID);
+  }
+  
+  @Test
+  public void testAddPullRequestReviewer() throws Exception {
+    ArrayList<StashUser> reviewers = new ArrayList<>();
+    StashUser stashUser = mock(StashUser.class);
+    reviewers.add(stashUser);
+    
+    StashPullRequest pullRequest = mock(StashPullRequest.class);
+    when(pullRequest.getReviewer(STASH_USER)).thenReturn(null);
+    when(pullRequest.getVersion()).thenReturn((long) 1);
+    
+    when(stashClient.getPullRequest(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID)).thenReturn(pullRequest);
+    when(stashClient.getUser(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, STASH_USER)).thenReturn(stashUser);
+    
+    myFacade.addPullRequestReviewer(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, STASH_USER, stashClient);
+    
+    verify(stashClient, times(1)).addPullRequestReviewer(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, (long) 1, reviewers);
+  }
+  
+  @Test
+  public void testAddPullRequestReviewerWithReviewerAlreadyAdded() throws Exception {
+    ArrayList<StashUser> reviewers = new ArrayList<>();
+    StashUser stashUser = mock(StashUser.class);
+    reviewers.add(stashUser);
+    
+    StashPullRequest pullRequest = mock(StashPullRequest.class);
+    when(pullRequest.getReviewer(STASH_USER)).thenReturn(stashUser);
+    when(pullRequest.getVersion()).thenReturn((long) 1);
+    
+    when(stashClient.getPullRequest(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID)).thenReturn(pullRequest);
+    when(stashClient.getUser(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, STASH_USER)).thenReturn(stashUser);
+    
+    myFacade.addPullRequestReviewer(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, STASH_USER, stashClient);
+    
+    verify(stashClient, times(0)).addPullRequestReviewer(STASH_PROJECT, STASH_REPOSITORY, STASH_PULLREQUEST_ID, (long) 1, reviewers);
   }
 }

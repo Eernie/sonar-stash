@@ -9,17 +9,21 @@ import com.ning.http.client.Response;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.text.MessageFormat;
+import java.util.ArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.lang3.StringUtils;
+import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.sonar.plugins.stash.StashPlugin;
 import org.sonar.plugins.stash.exceptions.StashClientException;
 import org.sonar.plugins.stash.exceptions.StashReportExtractionException;
 import org.sonar.plugins.stash.issue.StashCommentReport;
 import org.sonar.plugins.stash.issue.StashDiffReport;
+import org.sonar.plugins.stash.issue.StashPullRequest;
+import org.sonar.plugins.stash.issue.StashUser;
 import org.sonar.plugins.stash.issue.collector.StashCollector;
 
 public class StashClient {
@@ -29,6 +33,8 @@ public class StashClient {
   private final int stashTimeout;
 
   private static final String REST_API = "/rest/api/1.0/";
+  
+  private static final String USER_API = "{0}users/{1}";
   private static final String REPO_API = "{0}projects/{1}/repos/{2}/";
   private static final String PULL_REQUESTS_API = REPO_API + "pull-requests/";
   private static final String PULL_REQUEST_API = PULL_REQUESTS_API + "{3}";
@@ -38,6 +44,15 @@ public class StashClient {
   private static final String CONNECTION_POST_ERROR_MESSAGE = "Unable to post a comment to {0} #{1}. Received {2} with message {3}.";
   private static final String CONNECTION_GET_ERROR_MESSAGE = "Unable to get comment linked to {0} #{1}. Received {2} with message {3}.";
 
+  private static final String APPROVAL_PULL_REQUEST_API = PULL_REQUEST_API + "/approve";
+  
+  private static final String PULL_REQUEST_APPROVAL_POST_ERROR_MESSAGE = "Unable to change status of pull-request {0} #{1}. Received {2} with message {3}.";  
+  private static final String PULL_REQUEST_GET_ERROR_MESSAGE = "Unable to retrieve pull-request {0} #{1}. Received {2} with message {3}.";  
+  private static final String PULL_REQUEST_PUT_ERROR_MESSAGE = "Unable to update pull-request {0} #{1}. Received {2} with message {3}.";  
+  private static final String USER_GET_ERROR_MESSAGE = "Unable to retrieve user {0}. Received {1} with message {2}.";  
+  private static final String COMMENT_POST_ERROR_MESSAGE = "Unable to post a comment to {0} #{1}. Received {2} with message {3}.";  
+  private static final String COMMENT_GET_ERROR_MESSAGE = "Unable to get comment linked to {0} #{1}. Received {2} with message {3}.";  
+  
   public StashClient(String url, StashCredentials credentials, int stashTimeout) {
     this.baseUrl = url;
     this.credentials = credentials;
@@ -60,7 +75,7 @@ public class StashClient {
       int responseCode = response.getStatusCode();
       if (responseCode != HttpURLConnection.HTTP_CREATED) {
         String responseMessage = response.getStatusText();
-        throw new StashClientException(MessageFormat.format(CONNECTION_POST_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
+        throw new StashClientException(MessageFormat.format(COMMENT_POST_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
       }
     } catch (ExecutionException | TimeoutException | InterruptedException | IOException e) {
       throw new StashClientException(e);
@@ -165,11 +180,140 @@ public class StashClient {
       int responseCode = response.getStatusCode();
       if (responseCode != HttpURLConnection.HTTP_CREATED) {
         String responseMessage = response.getStatusText();
-        throw new StashClientException(MessageFormat.format(CONNECTION_POST_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
+        throw new StashClientException(MessageFormat.format(COMMENT_POST_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
       }
     } catch (ExecutionException | TimeoutException | IOException | InterruptedException e) {
       throw new StashClientException(e);
     } finally {
+      httpClient.close();
+    }
+  }
+  
+  public StashUser getUser(String project, String repository, String pullRequestId, String userSlug)
+      throws StashClientException {
+    
+    AsyncHttpClient httpClient = createHttpClient();
+    
+    try {
+      String request = MessageFormat.format(USER_API, baseUrl + REST_API, userSlug);
+      BoundRequestBuilder requestBuilder = httpClient.prepareGet(request);
+
+      Response response = executeRequest(requestBuilder);
+      int responseCode = response.getStatusCode();
+      if (responseCode != HttpURLConnection.HTTP_OK) {
+        String responseMessage = response.getStatusText();
+        throw new StashClientException(MessageFormat.format(USER_GET_ERROR_MESSAGE, userSlug, responseCode, responseMessage));
+      } else {
+        String jsonUser = response.getResponseBody();
+        return StashCollector.extractUser(jsonUser);
+      }
+    } catch (ExecutionException | TimeoutException | InterruptedException | StashReportExtractionException | IOException e) {
+      throw new StashClientException(e);
+    } finally {
+      httpClient.close();
+    }
+  }
+  
+  public StashPullRequest getPullRequest(String project, String repository, String pullRequestId)
+      throws StashClientException {
+    
+    AsyncHttpClient httpClient = createHttpClient();
+    
+    try {
+      String request = MessageFormat.format(PULL_REQUEST_API, baseUrl + REST_API, project, repository, pullRequestId);
+      BoundRequestBuilder requestBuilder = httpClient.prepareGet(request);
+
+      Response response = executeRequest(requestBuilder);
+      int responseCode = response.getStatusCode();
+      if (responseCode != HttpURLConnection.HTTP_OK) {
+        String responseMessage = response.getStatusText();
+        throw new StashClientException(MessageFormat.format(PULL_REQUEST_GET_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
+      } else {
+        String jsonPullRequest = response.getResponseBody();
+        return StashCollector.extractPullRequest(project, repository, pullRequestId, jsonPullRequest);
+      }
+    } catch (ExecutionException | TimeoutException | InterruptedException | StashReportExtractionException | IOException e) {
+      throw new StashClientException(e);
+    } finally {
+      httpClient.close();
+    }
+  }
+  
+  public void addPullRequestReviewer(String project, String repository, String pullRequestId, long pullRequestVersion, ArrayList<StashUser> reviewers)
+      throws StashClientException {
+    String request = MessageFormat.format(PULL_REQUEST_API, baseUrl + REST_API, project, repository, pullRequestId);
+
+    JSONObject json = new JSONObject();
+
+    JSONArray jsonReviewers = new JSONArray();
+    for (StashUser reviewer: reviewers) {
+      JSONObject reviewerName = new JSONObject();
+      reviewerName.put("name", reviewer.getName());
+
+      JSONObject user = new JSONObject();
+      user.put("user", reviewerName);
+
+      jsonReviewers.add(user);
+    }
+    
+    json.put("reviewers", jsonReviewers);
+    json.put("id", pullRequestId);
+    json.put("version", pullRequestVersion);
+
+    AsyncHttpClient httpClient = createHttpClient();
+    BoundRequestBuilder requestBuilder = httpClient.preparePut(request);
+    requestBuilder.setBody(json.toString());
+
+    try {
+      Response response = executeRequest(requestBuilder);
+      int responseCode = response.getStatusCode();
+      if (responseCode != HttpURLConnection.HTTP_OK) {
+        String responseMessage = response.getStatusText();
+        throw new StashClientException(MessageFormat.format(PULL_REQUEST_PUT_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
+      }
+    } catch (ExecutionException | TimeoutException | InterruptedException | IOException e) {
+      throw new StashClientException(e);
+    } finally {
+      httpClient.close();
+    }
+  }
+
+  public void approvePullRequest(String project, String repository, String pullRequestId) throws StashClientException {
+    String request = MessageFormat.format(APPROVAL_PULL_REQUEST_API, baseUrl + REST_API, project, repository, pullRequestId);
+    
+    AsyncHttpClient httpClient = createHttpClient();
+    BoundRequestBuilder requestBuilder = httpClient.preparePost(request);
+    
+    try {
+      Response response = executeRequest(requestBuilder);
+      int responseCode = response.getStatusCode();
+      if (responseCode != HttpURLConnection.HTTP_OK) {
+        String responseMessage = response.getStatusText();
+        throw new StashClientException(MessageFormat.format(PULL_REQUEST_APPROVAL_POST_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
+      }
+    } catch (ExecutionException | TimeoutException | InterruptedException | IOException e) {
+      throw new StashClientException(e);
+    } finally{
+      httpClient.close();
+    }
+  }
+  
+  public void resetPullRequestApproval(String project, String repository, String pullRequestId) throws StashClientException {
+    String request = MessageFormat.format(APPROVAL_PULL_REQUEST_API, baseUrl + REST_API, project, repository, pullRequestId);
+    
+    AsyncHttpClient httpClient = createHttpClient();
+    BoundRequestBuilder requestBuilder = httpClient.prepareDelete(request);
+    
+    try {
+      Response response = executeRequest(requestBuilder);
+      int responseCode = response.getStatusCode();
+      if (responseCode != HttpURLConnection.HTTP_OK) {
+        String responseMessage = response.getStatusText();
+        throw new StashClientException(MessageFormat.format(PULL_REQUEST_APPROVAL_POST_ERROR_MESSAGE, repository, pullRequestId, responseCode, responseMessage));
+      }
+    } catch (ExecutionException | TimeoutException | InterruptedException | IOException e) {
+      throw new StashClientException(e);
+    } finally{
       httpClient.close();
     }
   }

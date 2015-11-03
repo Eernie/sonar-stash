@@ -6,6 +6,7 @@ import com.ning.http.client.ListenableFuture;
 import com.ning.http.client.Response;
 
 import java.net.HttpURLConnection;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -16,6 +17,8 @@ import org.mockito.Spy;
 import org.sonar.plugins.stash.exceptions.StashClientException;
 import org.sonar.plugins.stash.issue.StashCommentReport;
 import org.sonar.plugins.stash.issue.StashDiffReport;
+import org.sonar.plugins.stash.issue.StashPullRequest;
+import org.sonar.plugins.stash.issue.StashUser;
 import org.sonar.plugins.stash.issue.collector.DiffReportSample;
 
 import static org.junit.Assert.*;
@@ -34,7 +37,7 @@ public class StashClientTest {
 
   @Mock
   AsyncHttpClient httpClient;
-
+  
   @Mock
   ListenableFuture<Response> listenableFurture;
 
@@ -58,6 +61,8 @@ public class StashClientTest {
     httpClient = mock(AsyncHttpClient.class);
     when(httpClient.preparePost(anyString())).thenReturn(requestBuilder);
     when(httpClient.prepareGet(anyString())).thenReturn(requestBuilder);
+    when(httpClient.prepareDelete(anyString())).thenReturn(requestBuilder);
+    when(httpClient.preparePut(anyString())).thenReturn(requestBuilder);
     doNothing().when(httpClient).close();
 
     StashClient client = new StashClient("baseUrl", new StashCredentials("login", "password"), 1000);
@@ -292,6 +297,253 @@ public class StashClientTest {
       verify(response, times(0)).getStatusText();
       verify(httpClient, times(1)).close();
     }
-
   }
+  
+  @Test
+  public void testGetUser() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    
+    String jsonUser = "{\"name\":\"SonarQube\", \"emailAddress\":\"sq@email.com\", \"id\":1, \"slug\":\"sonarqube\"}";
+    when(response.getResponseBody()).thenReturn(jsonUser);
+    
+    StashUser user = spyClient.getUser("Project", "Repository", "1", "sonarqube");
+    
+    assertEquals(user.getId(), 1);
+    assertEquals(user.getName(), "SonarQube");
+    assertEquals(user.getEmail(), "sq@email.com");
+    assertEquals(user.getSlug(), "sonarqube");
+    
+    verify(httpClient, times(1)).close(); 
+  }
+    
+  @Test
+  public void testGetUserWithWrongHTTPResult() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_FORBIDDEN);
+    
+    try {
+      spyClient.getUser("Project", "Repository", "1", "sonarqube");
+      
+      assertFalse("Wrong HTTP result should raised StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(1)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testGetUserWithException() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    when(listenableFurture.get(anyLong(), eq(TimeUnit.MILLISECONDS))).thenThrow(new TimeoutException("TimeoutException for Test"));
+    
+    try {
+      spyClient.getUser("Project", "Repository", "1", "sonarqube");
+      
+      assertFalse("Exception failure should be catched and convert to StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(0)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testGetPullRequest() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    
+    String jsonPullRequest = "{\"version\": 1, \"title\":\"PR-Test\", \"description\":\"PR-test\", \"reviewers\": []}";
+    when(response.getResponseBody()).thenReturn(jsonPullRequest);
+    
+    StashPullRequest pullRequest = spyClient.getPullRequest("Project", "Repository", "123");
+    
+    assertEquals(pullRequest.getId(), "123");
+    assertEquals(pullRequest.getProject(), "Project");
+    assertEquals(pullRequest.getRepository(), "Repository");
+    assertEquals(pullRequest.getVersion(), 1);
+    
+    verify(httpClient, times(1)).close(); 
+  }
+    
+  @Test
+  public void testGetPullRequestWithWrongHTTPResult() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_FORBIDDEN);
+    
+    try {
+      spyClient.getPullRequest("Project", "Repository", "123");
+      
+      assertFalse("Wrong HTTP result should raised StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(1)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testGetPullRequestWithException() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    when(listenableFurture.get(anyLong(), eq(TimeUnit.MILLISECONDS))).thenThrow(new TimeoutException("TimeoutException for Test"));
+    
+    try {
+      spyClient.getPullRequest("Project", "Repository", "123");
+      
+      assertFalse("Exception failure should be catched and convert to StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(0)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testApprovePullRequest() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    
+    spyClient.approvePullRequest("Project", "Repository", "123");
+    
+    verify(requestBuilder, times(1)).execute();
+    verify(httpClient, times(1)).close(); 
+  }
+    
+  @Test
+  public void testApprovePullRequestWithWrongHTTPResult() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_FORBIDDEN);
+    
+    try {
+      spyClient.approvePullRequest("Project", "Repository", "123");
+      
+      assertFalse("Wrong HTTP result should raised StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(1)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testApprovePullRequestWithException() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    when(listenableFurture.get(anyLong(), eq(TimeUnit.MILLISECONDS))).thenThrow(new TimeoutException("TimeoutException for Test"));
+    
+    try {
+      spyClient.approvePullRequest("Project", "Repository", "123");
+      
+      assertFalse("Exception failure should be catched and convert to StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(0)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+    
+  @Test
+  public void testResetPullRequestApproval() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    
+    spyClient.resetPullRequestApproval("Project", "Repository", "123");
+    
+    verify(requestBuilder, times(1)).execute();
+    verify(httpClient, times(1)).close(); 
+  }
+    
+  @Test
+  public void testResetPullRequestApprovalWithWrongHTTPResult() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_FORBIDDEN);
+    
+    try {
+      spyClient.resetPullRequestApproval("Project", "Repository", "123");
+      
+      assertFalse("Wrong HTTP result should raised StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(1)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testResetPullRequestApprovalWithException() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    when(listenableFurture.get(anyLong(), eq(TimeUnit.MILLISECONDS))).thenThrow(new TimeoutException("TimeoutException for Test"));
+    
+    try {
+      spyClient.resetPullRequestApproval("Project", "Repository", "123");
+      
+      assertFalse("Exception failure should be catched and convert to StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(0)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testAddPullRequestReviewer() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    
+    StashUser stashUser = mock(StashUser.class);
+    when(stashUser.getName()).thenReturn("sonarqube");
+    
+    ArrayList<StashUser> reviewers = new ArrayList<>();
+    reviewers.add(stashUser);
+    
+    spyClient.addPullRequestReviewer("Project", "Repository", "123", (long) 1, reviewers);
+    
+    verify(requestBuilder, times(1)).execute();
+    verify(httpClient, times(1)).close(); 
+  }
+  
+  @Test
+  public void testAddPullRequestReviewerWithNoReviewer() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    
+    spyClient.addPullRequestReviewer("Project", "Repository", "123", (long) 1, new ArrayList<StashUser>());
+    
+    verify(requestBuilder, times(1)).execute();
+    verify(httpClient, times(1)).close(); 
+  }
+    
+  @Test
+  public void testAddPullRequestReviewerWithWrongHTTPResult() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_FORBIDDEN);
+    
+    StashUser stashUser = mock(StashUser.class);
+    when(stashUser.getName()).thenReturn("sonarqube");
+    
+    ArrayList<StashUser> reviewers = new ArrayList<>();
+    reviewers.add(stashUser);
+    
+    try {
+      spyClient.addPullRequestReviewer("Project", "Repository", "123", (long) 1, reviewers);
+      
+      assertFalse("Wrong HTTP result should raised StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(1)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+  
+  @Test
+  public void testAddPullRequestReviewerWithException() throws Exception {
+    when(response.getStatusCode()).thenReturn(HttpURLConnection.HTTP_OK);
+    when(listenableFurture.get(anyLong(), eq(TimeUnit.MILLISECONDS))).thenThrow(new TimeoutException("TimeoutException for Test"));
+    
+    StashUser stashUser = mock(StashUser.class);
+    when(stashUser.getName()).thenReturn("sonarqube");
+    
+    ArrayList<StashUser> reviewers = new ArrayList<>();
+    reviewers.add(stashUser);
+    
+    try {
+      spyClient.addPullRequestReviewer("Project", "Repository", "123", (long) 1, reviewers);
+      
+      assertFalse("Exception failure should be catched and convert to StashClientException", true);
+      
+    } catch (StashClientException e) {
+      verify(response, times(0)).getStatusText();
+      verify(httpClient, times(1)).close();  
+    }
+  }
+
 }

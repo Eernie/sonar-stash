@@ -43,7 +43,8 @@ public class StashIssueReportingPostJobTest {
   private static final String STASH_PASSWORD = "password";
   private static final String STASH_URL = "http://url/to/stash";
   private static final int STASH_TIMEOUT = 10000;
-
+  private static final int STASH_ISSUE_THRESHOLD = 100;
+  
   private static final String SONARQUBE_URL = "http://url/to/sonarqube";
 
   @Before
@@ -55,6 +56,8 @@ public class StashIssueReportingPostJobTest {
     context = mock(SensorContext.class);
 
     config = mock(StashPluginConfiguration.class);
+    when(config.hasToNotifyStash()).thenReturn(true);
+    when(config.canApprovePullRequest()).thenReturn(false);
     when(config.getStashURL()).thenReturn(STASH_URL);
     when(config.getSonarQubeURL()).thenReturn(SONARQUBE_URL);
     when(config.getStashTimeout()).thenReturn(STASH_TIMEOUT);
@@ -64,6 +67,7 @@ public class StashIssueReportingPostJobTest {
     when(stashRequestFacade.getStashRepository()).thenReturn(STASH_REPOSITORY);
     when(stashRequestFacade.getStashPullRequestId()).thenReturn(STASH_PULLREQUEST_ID);
     when(stashRequestFacade.getCredentials()).thenReturn(new StashCredentials(STASH_LOGIN, STASH_PASSWORD));
+    when(stashRequestFacade.getIssueThreshold()).thenReturn(STASH_ISSUE_THRESHOLD);
   }
 
   @Test
@@ -149,21 +153,66 @@ public class StashIssueReportingPostJobTest {
 
   @Test
   public void should_display_analysis_summary_when_related_settings_are_set_to_true() throws Exception {
-    when(config.hasToNotifyStash()).thenReturn(true);
-    when(config.hasToDisplayAnalysisSummary()).thenReturn(true);
+      when(config.hasToNotifyStash()).thenReturn(true);
+      when(config.hasToDisplayAnalysisSummary()).thenReturn(true);
 
-    SonarQubeIssuesReport report = mock(SonarQubeIssuesReport.class);
-    when(report.countIssues()).thenReturn(101);
-    when(stashRequestFacade.extractIssueReport(projectIssues, inputFileCache)).thenReturn(report);
+      SonarQubeIssuesReport report = mock(SonarQubeIssuesReport.class);
+      when(report.countIssues()).thenReturn(101);
+      when(stashRequestFacade.extractIssueReport(projectIssues, inputFileCache)).thenReturn(report);
 
-    int issueThreshold = 100;
-    when(stashRequestFacade.getIssueThreshold()).thenReturn(issueThreshold);
+      int issueThreshold = 100;
+      when(stashRequestFacade.getIssueThreshold()).thenReturn(issueThreshold);
 
-    myJob = new StashIssueReportingPostJob(config, projectIssues, inputFileCache, stashRequestFacade);
-    myJob.executeOn(project, context);
+      myJob = new StashIssueReportingPostJob(config, projectIssues, inputFileCache, stashRequestFacade);
+      myJob.executeOn(project, context);
 
     verify(stashRequestFacade, times(1)).postAnalysisSummary(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(issueThreshold), eq(report),
       (StashClient) Mockito.anyObject());
+  }
+  
+  @Test
+  public void testExecuteOnWithPullRequestApprovalAndNoNewIssue() throws Exception {
+    when(config.canApprovePullRequest()).thenReturn(true);
+    
+    SonarQubeIssuesReport report = mock(SonarQubeIssuesReport.class);
+    when(report.countIssues()).thenReturn(0);
+    when(stashRequestFacade.extractIssueReport(projectIssues, inputFileCache)).thenReturn(report);
+    
+    myJob = new StashIssueReportingPostJob(config, projectIssues, inputFileCache, stashRequestFacade);
+    myJob.executeOn(project, context);
+    
+    verify(stashRequestFacade, times(1)).approvePullRequest(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(STASH_LOGIN), (StashClient) Mockito.anyObject());
+    verify(stashRequestFacade, times(0)).resetPullRequestApproval(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(STASH_LOGIN), (StashClient) Mockito.anyObject());
+  }
+  
+  @Test
+  public void testExecuteOnWithPullRequestApprovalAndNewIssues() throws Exception {
+    when(config.canApprovePullRequest()).thenReturn(true);
+    
+    SonarQubeIssuesReport report = mock(SonarQubeIssuesReport.class);
+    when(report.countIssues()).thenReturn(10);
+    when(stashRequestFacade.extractIssueReport(projectIssues, inputFileCache)).thenReturn(report);
+    
+    myJob = new StashIssueReportingPostJob(config, projectIssues, inputFileCache, stashRequestFacade);
+    myJob.executeOn(project, context);
+    
+    verify(stashRequestFacade, times(0)).approvePullRequest(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(STASH_LOGIN), (StashClient) Mockito.anyObject());
+    verify(stashRequestFacade, times(1)).resetPullRequestApproval(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(STASH_LOGIN), (StashClient) Mockito.anyObject());
+  }
+  
+  @Test
+  public void testExecuteOnWithoutPullRequestApproval() throws Exception {
+    when(config.canApprovePullRequest()).thenReturn(false);
+    
+    SonarQubeIssuesReport report = mock(SonarQubeIssuesReport.class);
+    when(report.countIssues()).thenReturn(0);
+    when(stashRequestFacade.extractIssueReport(projectIssues, inputFileCache)).thenReturn(report);
+    
+    myJob = new StashIssueReportingPostJob(config, projectIssues, inputFileCache, stashRequestFacade);
+    myJob.executeOn(project, context);
+    
+    verify(stashRequestFacade, times(0)).approvePullRequest(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(STASH_LOGIN), (StashClient) Mockito.anyObject());
+    verify(stashRequestFacade, times(0)).resetPullRequestApproval(eq(STASH_PROJECT), eq(STASH_REPOSITORY), eq(STASH_PULLREQUEST_ID), eq(STASH_LOGIN), (StashClient) Mockito.anyObject());
   }
 
   @Test
