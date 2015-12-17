@@ -69,4 +69,7 @@ public class StashPluginConfiguration implements BatchComponent {
     return settings.getString(StashPlugin.STASH_TASK_SEVERITY_THRESHOLD);
   }
 
+  public boolean canApprovePullRequest() {
+    return settings.getBoolean(StashPlugin.STASH_REVIEWER_APPROVAL);
+  }
 }

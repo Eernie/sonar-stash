@@ -39,6 +39,7 @@ public class StashPlugin extends SonarPlugin {
   public static final String STASH_URL = "sonar.stash.url";
   public static final String STASH_LOGIN = "sonar.stash.login";
   public static final String STASH_PASSWORD = "sonar.stash.password";
+  public static final String STASH_REVIEWER_APPROVAL = "sonar.stash.reviewer.approval";
   public static final String STASH_ISSUE_THRESHOLD = "sonar.stash.issue.threshold";
   public static final String STASH_TIMEOUT = "sonar.stash.timeout";
   public static final String STASH_DISPLAY_ANALYSIS_OVERVIEW = "sonar.stash.analysis.overview.display";
@@ -123,7 +124,15 @@ public class StashPlugin extends SonarPlugin {
 		.defaultValue(DEFAULT_TASKS_SEVERITY_THRESHOLD)
 		.options(Severity.ALL)
 		.index(7)
-		.build());
+		.build(),
+      PropertyDefinition.builder(STASH_REVIEWER_APPROVAL)
+          .name("Stash reviewer approval")
+          .description("Does SonarQube approve the pull-request if there is no new issues?")
+          .subCategory(CONFIG_PAGE_SUB_CATEGORY_STASH)
+          .onQualifiers(Qualifiers.PROJECT)
+          .type(PropertyType.BOOLEAN)
+          .defaultValue("false")
+          .index(8).build());
   }
 
 }
